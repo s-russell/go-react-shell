@@ -1,11 +1,12 @@
-package api
+package routes
 
 import (
 	"encoding/json"
 	"net/http"
+	"veracode.com/mypng/internal/api/services"
 )
 
-func LoginRoutes(userSvc *UserSvc) *http.ServeMux {
+func Login(userSvc *services.UserSvc) *http.ServeMux {
 
 	loginMux := http.NewServeMux()
 
@@ -23,12 +24,27 @@ func LoginRoutes(userSvc *UserSvc) *http.ServeMux {
 
 		isAuthenticated := userSvc.Authenticate(body.Username, body.Password)
 
-		var user *User
+		var user *services.User
 		if isAuthenticated {
 			user = userSvc.Authorize(body.Username)
 		} else {
-			userSvc.logger.Printf("failed to authenticate user %s", body.Username)
+			userSvc.Logger.Printf("failed to authenticate user %s", body.Username)
 			user = nil
+		}
+
+		if user != nil {
+			if token, err := userSvc.BuildJWT(user); err != nil {
+				userSvc.Logger.Printf("failed to build JWT for user %s: %v", user.Name, err)
+			} else {
+				http.SetCookie(rw, &http.Cookie{
+					Name:     "session_token",
+					Value:    token,
+					Path:     "/",  // Available to the entire domain
+					HttpOnly: true, // Makes the cookie inaccessible to client-side scripts
+					MaxAge:   3600, // Expires after 1 hour
+				})
+			}
+
 		}
 
 		rw.Header().Set("Content-Type", "application/json")

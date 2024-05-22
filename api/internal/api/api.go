@@ -3,19 +3,21 @@ package api
 import (
 	"github.com/jmoiron/sqlx"
 	"net/http"
+	"veracode.com/mypng/internal/api/routes"
+	"veracode.com/mypng/internal/api/services"
 )
 
 type API struct {
-	UserSvc *UserSvc
+	UserSvc *services.UserSvc
 }
 
 func Build(db *sqlx.DB) API {
-	userSvc := NewUserSvc(db)
+	userSvc := services.NewUserSvc(db)
 	return API{&userSvc}
 }
 
 func (api *API) AddRoutes(mux *http.ServeMux) {
 
-	mux.Handle("POST /api/", http.StripPrefix("/api", LoginRoutes(api.UserSvc)))
+	mux.Handle("POST /api/login", http.StripPrefix("/api", routes.Login(api.UserSvc)))
 
 }

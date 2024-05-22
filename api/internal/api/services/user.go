@@ -1,7 +1,11 @@
-package api
+package services
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"database/sql"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"log"
 	"os"
@@ -17,13 +21,24 @@ type User struct {
 }
 
 type UserSvc struct {
-	logger *log.Logger
+	Logger *log.Logger
 	db     *sqlx.DB
+	secret *ecdsa.PrivateKey // used to sign JWTs--restarting server logs everyone out
 }
 
 func NewUserSvc(db *sqlx.DB) UserSvc {
 	logger := log.New(os.Stdout, "UserSvc: ", log.LstdFlags|log.Lshortfile)
-	return UserSvc{logger, db}
+
+	secret, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		logger.Fatalf("Could not generate ECDSA key for request authentication %v", err)
+	}
+
+	return UserSvc{
+		logger,
+		db,
+		secret,
+	}
 }
 
 func (userSvc *UserSvc) Create(user *User, password string) (int64, error) {
@@ -46,7 +61,7 @@ func (userSvc *UserSvc) Create(user *User, password string) (int64, error) {
 	if err != nil {
 		return -1, err
 	}
-	userSvc.logger.Printf("createdd user %s", user.Name)
+	userSvc.Logger.Printf("createdd user %s", user.Name)
 	return insertedId, nil
 }
 
@@ -59,21 +74,21 @@ func (userSvc *UserSvc) Authenticate(username string, password string) bool {
 
 	rows, err := userSvc.db.Query(query, username)
 	if err != nil {
-		userSvc.logger.Printf("error authenticating user %s:\n%s\n", username, err)
+		userSvc.Logger.Printf("error authenticating user %s:\n%s\n", username, err)
 		return false
 	}
 
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			userSvc.logger.Printf("error cleaning up when authenticating user: %s\n", err)
+			userSvc.Logger.Printf("error cleaning up when authenticating user: %s\n", err)
 		}
 	}(rows)
 
 	if rows.Next() {
 		var lastPassword string
 		if err := rows.Scan(&lastPassword); err != nil {
-			userSvc.logger.Printf("error authenticating user %s:\n%s\n", username, err)
+			userSvc.Logger.Printf("error authenticating user %s:\n%s\n", username, err)
 			return false
 		}
 		err = bcrypt.CompareHashAndPassword([]byte(lastPassword), []byte(password))
@@ -98,12 +113,12 @@ func (userSvc *UserSvc) Authorize(username string) *User {
 
 	rows, err := userSvc.db.Queryx(query, username)
 	if err != nil {
-		userSvc.logger.Printf("error retrieving roles for user %s:\n%s\n", username, err)
+		userSvc.Logger.Printf("error retrieving roles for user %s:\n%s\n", username, err)
 	}
 	defer func(rows *sqlx.Rows) {
 		err := rows.Close()
 		if err != nil {
-			userSvc.logger.Printf("error cleaning up when retrieving roles for user  %s:\n%s\n", username, err)
+			userSvc.Logger.Printf("error cleaning up when retrieving roles for user  %s:\n%s\n", username, err)
 		}
 	}(rows)
 
@@ -111,7 +126,7 @@ func (userSvc *UserSvc) Authorize(username string) *User {
 	for rows.Next() {
 		err = rows.Scan(&firstName, &lastName, &role)
 		if err != nil {
-			userSvc.logger.Printf("error retrieving roles for user %s:\n%s\n", username, err)
+			userSvc.Logger.Printf("error retrieving roles for user %s:\n%s\n", username, err)
 		}
 		user.FirstName = firstName
 		user.LastName = lastName
@@ -122,4 +137,15 @@ func (userSvc *UserSvc) Authorize(username string) *User {
 
 	return &user
 
+}
+
+func (userSvc *UserSvc) BuildJWT(user *User) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub":       user.Name,
+		"roles":     user.Roles,
+		"firstName": user.FirstName,
+		"lastName":  user.LastName,
+	})
+
+	return token.SignedString(userSvc.secret)
 }
