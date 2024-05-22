@@ -8,6 +8,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"log"
+	"net/http"
 	"os"
 
 	"golang.org/x/crypto/bcrypt"
@@ -148,4 +149,39 @@ func (userSvc *UserSvc) BuildJWT(user *User) (string, error) {
 	})
 
 	return token.SignedString(userSvc.secret)
+}
+
+type httpLink func(rw http.ResponseWriter, r *http.Request)
+
+func (userSvc *UserSvc) AuthorizeRolesMiddleware(roles ...string) func(httpLink) http.Handler {
+	return func(nextHandlerFunc httpLink) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if !requestIsAuthenticated(r) {
+				http.Error(rw, "Forbidden", http.StatusForbidden)
+			}
+
+			if !requestIsAuthorized(userSvc, roles...) {
+				http.Error(rw, "Unauthorized", http.StatusUnauthorized)
+			}
+
+			http.HandlerFunc(nextHandlerFunc).ServeHTTP(rw, r)
+		})
+	}
+}
+
+func requestIsAuthenticated(r *http.Request) bool {
+
+	authHeader, err := r.Cookie("session_token")
+	if err != nil {
+		return false
+	}
+
+	// TODO: actually validate the token
+	authHeader = authHeader
+
+	return true
+}
+
+func requestIsAuthorized(svc *UserSvc, roles ...string) bool {
+	return true
 }
