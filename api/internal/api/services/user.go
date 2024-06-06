@@ -5,14 +5,34 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"database/sql"
+	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+var (
+	sessionLength = 1 * time.Hour
+)
+
+type UserClaims struct {
+	jwt.RegisteredClaims
+	Roles []string `json:"roles"`
+}
+
+func (claims *UserClaims) hasRole(candidate string) bool {
+	for _, role := range claims.Roles {
+		if candidate == role {
+			return true
+		}
+	}
+	return false
+}
 
 type User struct {
 	FirstName string   `json:"firstName"`
@@ -141,11 +161,15 @@ func (userSvc *UserSvc) Authorize(username string) *User {
 }
 
 func (userSvc *UserSvc) BuildJWT(user *User) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"sub":       user.Name,
-		"roles":     user.Roles,
-		"firstName": user.FirstName,
-		"lastName":  user.LastName,
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, &UserClaims{
+		jwt.RegisteredClaims{
+			Issuer:    "steve",
+			Subject:   user.Name,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(sessionLength)),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		user.Roles,
 	})
 
 	return token.SignedString(userSvc.secret)
@@ -153,15 +177,25 @@ func (userSvc *UserSvc) BuildJWT(user *User) (string, error) {
 
 type httpLink func(rw http.ResponseWriter, r *http.Request)
 
-func (userSvc *UserSvc) AuthorizeRolesMiddleware(roles ...string) func(httpLink) http.Handler {
+func (userSvc *UserSvc) AuthorizeAnyRoleMiddleware(roles ...string) func(httpLink) http.Handler {
 	return func(nextHandlerFunc httpLink) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			if !requestIsAuthenticated(r) {
+			//Authenticate
+			claims, ok := validateToken(r, &userSvc.secret.PublicKey)
+			if !ok {
 				http.Error(rw, "Forbidden", http.StatusForbidden)
+				return
 			}
 
-			if !requestIsAuthorized(userSvc, roles...) {
+			//Authorize
+			isAuthorized := false
+			for _, role := range roles {
+				isAuthorized = isAuthorized || claims.hasRole(role)
+			}
+
+			if !isAuthorized {
 				http.Error(rw, "Unauthorized", http.StatusUnauthorized)
+				return
 			}
 
 			http.HandlerFunc(nextHandlerFunc).ServeHTTP(rw, r)
@@ -169,19 +203,26 @@ func (userSvc *UserSvc) AuthorizeRolesMiddleware(roles ...string) func(httpLink)
 	}
 }
 
-func requestIsAuthenticated(r *http.Request) bool {
+func validateToken(r *http.Request, publicKey *ecdsa.PublicKey) (*UserClaims, bool) {
 
-	authHeader, err := r.Cookie("session_token")
-	if err != nil {
-		return false
+	tokenCookie, err := r.Cookie("session_token")
+	if err != nil || tokenCookie == nil {
+		return nil, false
 	}
 
-	// TODO: actually validate the token
-	authHeader = authHeader
+	token, err := jwt.Parse(tokenCookie.String(), func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return publicKey, nil
+	})
+	if err != nil {
+		return nil, false
+	}
 
-	return true
-}
-
-func requestIsAuthorized(svc *UserSvc, roles ...string) bool {
-	return true
+	if claims, ok := token.Claims.(UserClaims); !ok {
+		return nil, false
+	} else {
+		return &claims, true
+	}
 }

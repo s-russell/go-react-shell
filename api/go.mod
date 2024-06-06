@@ -1,4 +1,4 @@
-module veracode.com/mypng
+module jerubaal.com/goreactor
 
 go 1.22.0
 

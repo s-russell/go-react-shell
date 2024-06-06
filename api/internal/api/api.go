@@ -18,6 +18,7 @@ func Build(db *sqlx.DB) API {
 
 func (api *API) AddRoutes(mux *http.ServeMux) {
 
-	mux.Handle("POST /api/login", http.StripPrefix("/api", routes.Login(api.UserSvc)))
+	mux.Handle("/api/login/*", http.StripPrefix("/api/login", routes.Login(api.UserSvc)))
+	mux.Handle("/api/user/*", http.StripPrefix("/api/user", routes.User(api.UserSvc)))
 
 }

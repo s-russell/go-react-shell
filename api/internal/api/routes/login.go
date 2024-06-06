@@ -10,7 +10,7 @@ func Login(userSvc *services.UserSvc) *http.ServeMux {
 
 	loginMux := http.NewServeMux()
 
-	loginMux.HandleFunc("POST /login", func(rw http.ResponseWriter, req *http.Request) {
+	loginMux.HandleFunc("POST /", func(rw http.ResponseWriter, req *http.Request) {
 
 		body := struct {
 			Username string `json:"username"`

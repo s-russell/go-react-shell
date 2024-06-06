@@ -1,18 +1,18 @@
 package routes
 
 import (
+	"jerubaal.com/goreactor/internal/api/services"
 	"net/http"
-	"veracode.com/mypng/internal/api/services"
 )
 
 func User(userSvc *services.UserSvc) *http.ServeMux {
 
 	userMux := http.NewServeMux()
 
-	devsOnly := userSvc.AuthorizeRolesMiddleware("developers")
+	devsOnly := userSvc.AuthorizeAnyRoleMiddleware("developers")
 
-	userMux.Handle("get /user/devsonly", devsOnly(func(rw http.ResponseWriter, req *http.Request) {
-		return
+	userMux.Handle("GET /devsonly", devsOnly(func(rw http.ResponseWriter, req *http.Request) {
+		rw.WriteHeader(http.StatusAccepted)
 	}))
 
 	return userMux

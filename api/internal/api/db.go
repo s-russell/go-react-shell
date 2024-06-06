@@ -20,7 +20,7 @@ var (
 )
 
 func GetDB() (*sqlx.DB, error) {
-	dbLoc := "mypng.sqlite"
+	dbLoc := "app.sqlite"
 	if userSuppliedLoc, ok := os.LookupEnv("DB_LOCATION"); ok {
 		dbLoc = userSuppliedLoc
 	}
